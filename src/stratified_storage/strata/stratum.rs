@@ -3,6 +3,7 @@ use std::thread::spawn;
 use crossbeam_channel;
 use bincode::serialize;
 use bincode::deserialize;
+use data::LabeledData;
 use commons::channel;
 use commons::performance_monitor::PerformanceMonitor;
 use commons::ExampleWithScore;
@@ -11,7 +12,8 @@ use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
 
-use super::Block;
+use super::super::super::TFeature;
+use super::super::super::TLabel;
 use super::InQueueSender;
 use super::OutQueueReceiver;
 use super::disk_buffer::DiskBuffer;
@@ -30,6 +32,7 @@ impl Stratum {
         index: i8,
         num_examples_per_block: usize,
         disk_buffer: Arc<RwLock<DiskBuffer>>,
+        is_sparse: bool,
     ) -> Stratum {
         // memory buffer for incoming examples
         let (in_queue_s, in_queue_r) =
@@ -41,17 +44,34 @@ impl Stratum {
         let (out_queue_s, out_queue_r) =
             channel::bounded(num_examples_per_block * 2, &format!("stratum-o({})", index));
 
+        type SparseSerialized = Vec<((Vec<usize>, Vec<TFeature>, TLabel), (f32, usize))>;
+        type DenseSerialized = Vec<((Vec<TFeature>, TLabel), (f32, usize))>;
         // Pushing in data from outside
         {
             let in_queue_r = in_queue_r.clone();
             let disk_buffer = disk_buffer.clone();
+            let is_sparse = is_sparse.clone();
             spawn(move || {
                 loop {
                     if in_queue_r.len() >= num_examples_per_block {
-                        let in_block: Vec<ExampleWithScore> =
-                            (0..num_examples_per_block).map(|_| in_queue_r.recv().unwrap())
-                                                       .collect();
-                        let serialized_block = serialize(&(*in_block)).unwrap();
+                        let block: SparseSerialized =
+                            (0..num_examples_per_block).map(|_| {
+                                let packet: ExampleWithScore = in_queue_r.recv().unwrap();
+                                let (example, score) = packet;
+                                let (idx, vals, lbl, _) = example.into();
+                                ((idx, vals, lbl), score)
+                            }).collect();
+                        let serialized_block = {
+                            if is_sparse {
+                                serialize(&(*block)).unwrap()
+                            } else {
+                                let block: DenseSerialized =
+                                    block.into_iter()
+                                         .map(|((_, vals, lbl), score)| ((vals, lbl), score))
+                                         .collect();
+                                serialize(&(*block)).unwrap()
+                            }
+                        };
                         let mut disk = disk_buffer.write().unwrap();
                         let slot_index = disk.write(&serialized_block);
                         drop(disk);
@@ -74,13 +94,29 @@ impl Stratum {
                 let mut example = out_block_ptr.next();
                 if example.is_none() {
                     if let Some(block_index) = slot_r.try_recv() {
-                        let out_block: Block = {
+                        let out_block: Vec<ExampleWithScore> = {
                             let mut disk = disk_buffer.write().unwrap();
                             let block_data: Vec<u8> = disk.read(block_index);
                             drop(disk);
-                            deserialize(&block_data).expect(
-                                "Cannot deserialize block."
-                            )
+
+                            if is_sparse {
+                                let block: SparseSerialized =
+                                    deserialize(&block_data).expect(
+                                        "Cannot deserialize block."
+                                    );
+                                block.into_iter().map(|((idx, vals, lbl), score)|
+                                    (LabeledData::new(idx, vals, lbl, true), score)
+                                ).collect()
+                            } else {
+                                let block: DenseSerialized =
+                                    deserialize(&block_data).expect(
+                                        "Cannot deserialize block."
+                                    );
+                                block.into_iter().map(|((vals, lbl), score)|
+                                    (LabeledData::new(vec![0; vals.len()], vals, lbl, false),
+                                        score)
+                                ).collect()
+                            }
                         };
                         out_block_ptr = out_block.into_iter();
                         example = out_block_ptr.next();

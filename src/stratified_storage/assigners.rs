@@ -137,7 +137,7 @@ mod tests {
         filename: &str,
         num_threads: usize,
     ) -> (Receiver<(i8, (i32, f64))>, Sender<ExampleWithScore>, Assigners) {
-        let strata = Arc::new(RwLock::new(Strata::new(100, 3, 10, filename)));
+        let strata = Arc::new(RwLock::new(Strata::new(100, 3, 10, false, filename)));
         let (updated_examples_send, updated_examples_recv) = channel::bounded(10, "updated-examples");
         let (stats_update_s, stats_update_r) = channel::bounded(100, "stats");
         (

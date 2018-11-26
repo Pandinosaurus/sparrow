@@ -82,22 +82,24 @@ pub fn create_bins(
     data_loader: &mut BufferLoader,
 ) -> Vec<Bins> {
     let start = range.start;
-    let range_size = range.end - start;
-    let mut distinct: Vec<DistinctValues> = Vec::with_capacity(range_size);
+    let end = range.end;
+    let mut distinct: Vec<DistinctValues> = Vec::with_capacity(end - start);
     let mut remaining_reads = max_sample_size;
 
-    for _ in 0..range_size {
+    for _ in start..end {
         distinct.push(DistinctValues::new());
     }
     while remaining_reads > 0 {
         let data = data_loader.get_next_batch(false /* no switch buffers */);
         data.iter().for_each(|example| {
-            let feature = &(example.0.feature);
-            distinct.iter_mut()
-                    .enumerate()
-                    .for_each(|(idx, mapper)| {
-                        mapper.update(feature[start + idx] as f32);
-                    });
+            let mut i = example.0.get_position(start);
+            while let Some((index, value)) = example.0.get_value_at(i) {
+                if index >= end {
+                    break;
+                }
+                distinct[index - start].update(value as f32);
+                i += 1;
+            }
         });
         remaining_reads -= data.len();
     }

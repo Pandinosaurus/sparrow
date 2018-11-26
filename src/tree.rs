@@ -99,9 +99,18 @@ impl Tree {
 
     pub fn get_leaf_prediction(&self, data: &Example) -> f32 {
         let mut node: usize = 0;
-        let feature = &(data.feature);
         while let Some(split_feature) = self.split_feature[node] {
-            node = if feature[split_feature as usize] as f32 <= self.threshold[node] {
+            let index = data.get_position(split_feature as usize);
+            let value = {
+                let mut ret = 0.0;
+                if let Some((idx, val)) = data.get_value_at(index) {
+                    if index == idx {
+                        ret = val as f32;
+                    }
+                }
+                ret
+            };
+            node = if value <= self.threshold[node] {
                 self.left_child[node]
             } else {
                 self.right_child[node]

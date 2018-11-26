@@ -18,7 +18,6 @@ use commons::get_sign;
 use commons::ExampleWithScore;
 use commons::Model;
 use commons::Signal;
-use super::Example;
 
 use self::assigners::Assigners;
 use self::samplers::Samplers;
@@ -108,6 +107,7 @@ impl StratifiedStorage {
         num_examples: usize,
         feature_size: usize,
         num_examples_per_block: usize,
+        is_sparse: bool,
         disk_buffer_filename: &str,
         num_assigners: usize,
         num_samplers: usize,
@@ -117,7 +117,7 @@ impl StratifiedStorage {
         channel_size: usize,
     ) -> StratifiedStorage {
         let strata = Strata::new(num_examples, feature_size, num_examples_per_block,
-                                 disk_buffer_filename);
+                                 is_sparse, disk_buffer_filename);
         let strata = Arc::new(RwLock::new(strata));
 
         let (counts_table_r, mut counts_table_w) = evmap::new();
@@ -219,11 +219,13 @@ impl StratifiedStorage {
         feature_size: usize,
         is_binary: bool,
         bytes_per_example: Option<usize>,
+        is_sparse: bool,
     ) {
         let mut reader = SerialStorage::new(
             filename.clone(),
             size,
             feature_size,
+            is_sparse,
             is_binary,
             bytes_per_example,
             true,
@@ -287,7 +289,8 @@ mod tests {
         let (signal_s, signal_r) = channel::bounded(10, "sampling-signal");
         signal_s.send(Signal::START);
         let stratified_storage = StratifiedStorage::new(
-            batch * 10, 1, 10000, filename, 4, 4, sampled_examples_send, signal_r, models_recv, 10
+            batch * 10, 1, 10000, false, filename, 4, 4,
+            sampled_examples_send, signal_r, models_recv, 10,
         );
         let updated_examples_send = stratified_storage.updated_examples_s.clone();
         let mut pm_load = PerformanceMonitor::new();

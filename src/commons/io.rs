@@ -13,7 +13,7 @@ use std::io::BufReader;
 use std::io::BufWriter;
 
 use commons::Example;
-use labeled_data::LabeledData;
+use data::LabeledData;
 
 
 pub fn create_bufreader(filename: &String) -> BufReader<File> {
@@ -38,16 +38,17 @@ pub fn read_k_labeled_data<TFeature, TLabel>(
     reader: &mut BufReader<File>,
     k: usize,
     missing_val: TFeature,
-    size: usize
+    size: usize,
+    is_sparse: bool,
 ) -> Vec<LabeledData<TFeature, TLabel>>
 where
     TFeature: FromStr + Clone + Send + Sync,
     TFeature::Err: Debug,
-    TLabel: FromStr + Send + Sync,
+    TLabel: FromStr + Clone + Send + Sync,
     TLabel::Err: Debug,
 {
     let lines = read_k_lines(reader, k);
-    parse_libsvm(&lines, missing_val, size)
+    parse_libsvm(&lines, missing_val, size, is_sparse)
 }
 
 pub fn read_k_labeled_data_from_binary_file(
@@ -76,41 +77,53 @@ fn parse_libsvm_one_line<TFeature, TLabel>(
     raw_string: &String,
     missing_val: TFeature,
     size: usize,
+    is_sparse: bool,
 ) -> LabeledData<TFeature, TLabel>
 where
     TFeature: FromStr + Clone + Send + Sync,
     TFeature::Err: Debug,
-    TLabel: FromStr + Send + Sync,
-    TLabel::Err: Debug
+    TLabel: FromStr + Clone + Send + Sync,
+    TLabel::Err: Debug,
 {
     let mut numbers = raw_string.split_whitespace();
     let label: TLabel = numbers.next().unwrap().parse().unwrap();
-    let mut feature: Vec<TFeature> = vec![missing_val; size];
+    let mut indices: Vec<usize> = vec![0; size];
+    let mut values: Vec<TFeature> = vec![missing_val.clone(); size];
     numbers.map(|index_value| {
         let sep = index_value.find(':').unwrap();
         (
             index_value[..sep].parse().unwrap(),
             index_value[sep+1..].parse().unwrap()
         )
-    }).for_each(|(index, value): (usize, TFeature)| {
-        feature[index] = value;
+    }).enumerate().for_each(|(i, (index, value)): (usize, (usize, TFeature))| {
+        indices[i] = index;
+        values[i] = value;
     });
-    LabeledData::new(feature, label)
+    if is_sparse {
+        LabeledData::new(indices, values, label, is_sparse)
+    } else {
+        let mut feature: Vec<TFeature> = vec![missing_val; size];
+        indices.iter().zip(values).for_each(|(index, val): (&usize, TFeature)| {
+            feature[*index] = val;
+        });
+        LabeledData::new(indices, feature, label, is_sparse)
+    }
 }
 
 fn parse_libsvm<TFeature, TLabel>(
     raw_strings: &Vec<String>,
     missing_val: TFeature,
     size: usize,
+    is_sparse: bool,
 ) -> Vec<LabeledData<TFeature, TLabel>>
 where
     TFeature: FromStr + Clone + Send + Sync,
     TFeature::Err: Debug,
-    TLabel: FromStr + Send + Sync,
+    TLabel: FromStr + Clone + Send + Sync,
     TLabel::Err: Debug
 {
     raw_strings.par_iter()
-               .map(|s| parse_libsvm_one_line(&s, missing_val.clone(), size))
+               .map(|s| parse_libsvm_one_line(&s, missing_val.clone(), size, is_sparse))
                .collect()
 }
 

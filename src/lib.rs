@@ -35,12 +35,12 @@ mod booster;
 /// of the caches to feed data to the boosting algorithm, and the other
 /// to load next sample set.
 mod buffer_loader; 
+/// Data examples
+mod data;
 /// A stratified storage structor that organize examples on disk according to their weights.
 mod stratified_storage;
 /// Common functions and classes.
 mod commons;
-/// The class of the training examples.
-mod labeled_data;
 /// Validating models
 mod validator;
 
@@ -55,7 +55,7 @@ use validator::run_validate;
 
 // Types
 // TODO: use generic types for specifing types
-use labeled_data::LabeledData;
+use data::LabeledData;
 pub type TFeature = u8;
 pub type TLabel = u8;
 pub type Example = LabeledData<TFeature, TLabel>;
@@ -75,6 +75,7 @@ struct Config {
     pub num_examples: usize,
     pub num_testing_examples: usize,
     pub num_features: usize,
+    pub is_sparse: bool,
     pub range: std::ops::Range<usize>, 
     pub max_sample_size: usize, 
     pub max_bin_size: usize, 
@@ -120,6 +121,7 @@ pub fn run_rust_boost(config_file: String) {
         config.num_examples,
         config.num_features,
         config.num_examples_per_block,
+        config.is_sparse,
         config.disk_buffer_filename.as_ref(),
         config.num_assigners,
         config.num_samplers,
@@ -136,6 +138,7 @@ pub fn run_rust_boost(config_file: String) {
         config.num_features,
         config.training_is_binary,
         Some(config.training_bytes_per_example),
+        config.is_sparse,
     );
     info!("Starting the buffered loader.");
     let buffer_loader = BufferLoader::new(
@@ -168,6 +171,7 @@ pub fn run_rust_boost(config_file: String) {
         config.num_testing_examples,
         config.num_features,
         config.batch_size,
+        config.is_sparse,
         config.testing_is_binary,
         Some(config.testing_bytes_per_example),
         vec![EvalFunc::AdaBoostLoss, EvalFunc::AUPRC],

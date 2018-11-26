@@ -6,7 +6,12 @@ use std::io::SeekFrom;
 use std::io::Write;
 
 use std::fs::remove_file;
+use bincode::serialize;
+
 use super::bitmap::BitMap;
+use super::TFeature;
+use super::TLabel;
+use data::LabeledData;
 
 // TODO: implement in-memory I/O buffer for both reading and writing
 
@@ -83,6 +88,36 @@ impl Drop for DiskBuffer {
 }
 
 
+pub fn get_disk_buffer(
+    filename: &str,
+    feature_size: usize,
+    num_examples: usize,
+    num_examples_per_block: usize,
+    is_sparse: bool,
+) -> DiskBuffer {
+    let num_disk_block = (num_examples + num_examples_per_block - 1) / num_examples_per_block;
+    let block_size = get_block_size(feature_size, num_examples_per_block, is_sparse);
+    DiskBuffer::new(filename, block_size, num_disk_block)
+}
+
+
+fn get_block_size(feature_size: usize, num_examples_per_block: usize, is_sparse: bool) -> usize {
+    let serialized_block: Vec<u8> = {
+        let example = LabeledData::new(
+            vec![0; feature_size], vec![0 as TFeature; feature_size], 0 as TLabel, false);
+        let (indices, values, label, _) = example.into();
+        if is_sparse {
+            let block = vec![((indices, values, label), (0.0, 0)); num_examples_per_block];
+            serialize(&block).unwrap()
+        } else {
+            let block = vec![((values, label), (0.0, 0)); num_examples_per_block];
+            serialize(&block).unwrap()
+        }
+    };
+    serialized_block.len()
+}
+
+
 #[cfg(test)]
 mod tests {
     use bincode::serialize;
@@ -90,13 +125,13 @@ mod tests {
 
     use labeled_data::LabeledData;
     use commons::ExampleWithScore;
-    use super::super::get_disk_buffer;
+    use super::get_disk_buffer;
 
 
     #[test]
     fn test_disk_buffer_normal_write() {
         let filename = "unittest-diskbuffer1.bin";
-        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10);
+        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10, false);
         let example = get_example(vec![1, 2, 3]);
         let data = serialize(&vec![example; 10]).unwrap();
         for _ in 0..5 {
@@ -107,7 +142,7 @@ mod tests {
     #[test]
     fn test_disk_buffer_rw_once() {
         let filename = "unittest-diskbuffer2.bin";
-        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10);
+        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10, false);
         let example = get_example(vec![4, 5, 6]);
         let examples = vec![example; 10];
         let data = serialize(&examples).unwrap();
@@ -121,7 +156,7 @@ mod tests {
     #[test]
     fn test_disk_buffer_rw_one_by_one() {
         let filename = "unittest-diskbuffer3.bin";
-        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10);
+        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10, false);
         for i in 0..5 {
             let example = get_example(vec![1, 2, i]);
             let examples = vec![example; 10];
@@ -138,7 +173,7 @@ mod tests {
     #[test]
     fn test_disk_buffer_rw_seq() {
         let filename = "unittest-diskbuffer4.bin";
-        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10);
+        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10, false);
         let mut inputs = vec![];
         for i in 0..5 {
             let example = get_example(vec![1, 2, i]);
@@ -160,7 +195,7 @@ mod tests {
     #[should_panic]
     fn test_disk_buffer_read_panic() {
         let filename = "unittest-diskbuffer5.bin";
-        let mut disk_buffer = get_disk_buffer(filename, 3, 10, 10);
+        let mut disk_buffer = get_disk_buffer(filename, 3, 10, 10, false);
         disk_buffer.read(0);
     }
 
@@ -168,7 +203,7 @@ mod tests {
     #[should_panic]
     fn test_disk_buffer_write_disk_full_panic() {
         let filename = "unittest-diskbuffer6.bin";
-        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10);
+        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10, false);
         let example = get_example(vec![1, 2, 3]);
         let data = serialize(&vec![example; 10]).unwrap();
         for _ in 0..6 {
@@ -180,7 +215,7 @@ mod tests {
     #[should_panic]
     fn test_disk_buffer_write_feature_size_mismatch_panic() {
         let filename = "unittest-diskbuffer7.bin";
-        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10);
+        let mut disk_buffer = get_disk_buffer(filename, 3, 50, 10, false);
         let example = get_example(vec![1, 2, 3, 4]);
         let data = serialize(&vec![example; 10]).unwrap();
         disk_buffer.write(&data);
